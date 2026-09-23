@@ -626,6 +626,7 @@ jobs:
             exit 1
           fi
           echo "Patch applied successfully."
+      
       - name: Build GKI Kernel
         run: |
           cd kernel
@@ -665,7 +666,69 @@ jobs:
           else
             run_dist_target //common:kernel_aarch64_dist "${DIST_NAME}/"
           fi
+      
+      - name: Debug - Locate .ko files
+        run: |
+          set +e
+          echo "=========================================="
+          echo "DEBUG: Locate all .ko files in kernel tree"
+          echo "=========================================="
 
+          echo ""
+          echo "----- 1) pwd -----"
+          pwd
+          echo "----- ls -la kernel -----"
+          ls -la kernel 2>/dev/null
+
+          echo ""
+          echo "----- 2) DIST_NAME = ${DIST_NAME} -----"
+          echo "----- ls -la kernel/${DIST_NAME} -----"
+          ls -la "kernel/${DIST_NAME}" 2>/dev/null || echo "DIST dir not found"
+
+          echo ""
+          echo "----- 3) all .ko under kernel/${DIST_NAME} -----"
+          find "kernel/${DIST_NAME}" -name '*.ko' -type f 2>/dev/null | sort
+
+          echo ""
+          echo "----- 4) all .ko under kernel/ (whole tree) -----"
+          find kernel -name '*.ko' -type f 2>/dev/null | sort
+
+          echo ""
+          echo "----- 5) top 40 dirs containing .ko -----"
+          find kernel -name '*.ko' -type f 2>/dev/null \
+            | xargs -r -n1 dirname \
+            | sort -u \
+            | head -40
+
+          echo ""
+          echo "----- 6) count per dir -----"
+          find kernel -name '*.ko' -type f 2>/dev/null \
+            | xargs -r -n1 dirname \
+            | sort \
+            | uniq -c \
+            | sort -rn \
+            | head -40
+
+          echo ""
+          echo "----- 7) look for virtio_blk.ko specifically -----"
+          find kernel -name 'virtio_blk.ko' -type f 2>/dev/null
+
+          echo ""
+          echo "----- 8) look for kernel version dirs under dist -----"
+          find "kernel/${DIST_NAME}" -type d -name 'modules' 2>/dev/null
+          find "kernel/${DIST_NAME}" -type d -path '*lib/modules*' 2>/dev/null
+
+          echo ""
+          echo "----- 9) dist dir tree (2 levels) -----"
+          find "kernel/${DIST_NAME}" -maxdepth 3 -type d 2>/dev/null | sort | head -80
+
+          echo ""
+          echo "=========================================="
+          echo "DEBUG END"
+          echo "=========================================="
+        continue-on-error: true
+
+          
       - name: Prepare Artifacts
         run: |
           mkdir -p output
@@ -705,10 +768,40 @@ jobs:
           Build Date: $(date -u)
           EOF
 
-      - name: Upload Kernel Artifact
+      - name: Upload Kernel Modules (.ko)
+        run: |
+          set -e
+          cd "kernel/${DIST_NAME}"
+
+          MOD_DIR="../../output-ko"
+          mkdir -p "$MOD_DIR"
+
+          echo "===== searching .ko files under $(pwd) ====="
+          mapfile -t KO_FILES < <(find . -type f -name '*.ko' | sort)
+
+          if [ "${#KO_FILES[@]}" -eq 0 ]; then
+            echo "ERROR: no .ko files found under $(pwd)"
+            echo "---- directory tree (depth 4) ----"
+            find . -maxdepth 4 -type d | sort | head -100
+            exit 1
+          fi
+
+          echo "Found ${#KO_FILES[@]} .ko files:"
+          printf '%s\n' "${KO_FILES[@]}"
+
+          # 保留相对路径打包，方便你对照系统里的 /lib/modules/...
+          tar -czvf "${MOD_DIR}/${ARTIFACT_NAME}-modules.tar.gz" "${KO_FILES[@]}"
+
+          # 也生成一份清单，方便排查
+          printf '%s\n' "${KO_FILES[@]}" > "${MOD_DIR}/${ARTIFACT_NAME}-modules.list"
+
+          echo "===== packaged ====="
+          ls -lh "$MOD_DIR"
+
+      - name: Upload Kernel Modules Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.dist.outputs.artifact_name }}
-          path: output/*
+          name: ${{ steps.dist.outputs.artifact_name }}-modules
+          path: output-ko/*
           if-no-files-found: error
           compression-level: 9
