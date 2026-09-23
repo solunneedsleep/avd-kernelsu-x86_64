@@ -731,18 +731,50 @@ jobs:
           
       - name: Prepare Artifacts
         run: |
+          set -e
           mkdir -p output
           cd "kernel/${DIST_NAME}"
+
           if [ "$KSU_X86_SYSCALL_HARDENING_PATCHED" = "true" ] && [ "$KSU_X86_SYSCALL_HARDENING_DEFAULT_OFF" != "true" ]; then
             REQUIRED_BOOT_ARG="syscall_hardening=off"
           else
             REQUIRED_BOOT_ARG="none"
           fi
 
-          cp bzImage ../../output/ 2>/dev/null || true
-          cp Image ../../output/ 2>/dev/null || true
-          cp Image.gz ../../output/ 2>/dev/null || true
+          # ---- 内核镜像：缺了就报错，不再 || true ----
+          if [ -f bzImage ]; then
+            cp bzImage ../../output/
+          elif [ -f Image ]; then
+            cp Image ../../output/
+          elif [ -f Image.gz ]; then
+            cp Image.gz ../../output/
+          else
+            echo "ERROR: no bzImage/Image/Image.gz in $(pwd)"; exit 1
+          fi
 
+          # ---- 模块：用 staging/lib/modules 下天然带目录结构的 .ko ----
+          STAGING="$(ls -d ../../kernel/out/bazel/output_user_root/*/execroot/_main/bazel-out/k8-fastbuild/bin/common/kernel_x86_64_modules_install/staging 2>/dev/null | head -n1)"
+
+          if [ -n "$STAGING" ] && [ -d "$STAGING/lib/modules" ]; then
+            echo "using structured modules from: $STAGING/lib/modules"
+            # 保留 lib/modules/<ver>/kernel/... 结构
+            mkdir -p ../../output/lib
+            cp -a "$STAGING/lib/modules" ../../output/lib/
+          else
+            echo "WARN: structured staging not found, falling back to flat .ko in dist"
+            # 兜底：把平铺 .ko 放 misc 下，至少不丢文件
+            for ko in *.ko; do
+              [ -f "$ko" ] || continue
+              mkdir -p ../../output/lib/modules/6.6.30-android15-8-maybe-dirty/kernel/misc
+              cp "$ko" ../../output/lib/modules/6.6.30-android15-8-maybe-dirty/kernel/misc/
+            done
+          fi
+
+          # ---- system_dlkm 镜像（可选，带上更保险）----
+          cp system_dlkm.flatten.ext4.img  ../../output/ 2>/dev/null || true
+          cp system_dlkm.flatten.erofs.img ../../output/ 2>/dev/null || true
+
+          # ---- build-info.txt ----
           cat > ../../output/build-info.txt << EOF
           Target ID: ${TARGET_ID}
           Target Name: ${TARGET_NAME}
@@ -768,35 +800,9 @@ jobs:
           Build Date: $(date -u)
           EOF
 
-      - name: Upload Kernel Modules (.ko)
-        run: |
-          set -e
-          cd "kernel/${DIST_NAME}"
-
-          MOD_DIR="../../output-ko"
-          mkdir -p "$MOD_DIR"
-
-          echo "===== searching .ko files under $(pwd) ====="
-          mapfile -t KO_FILES < <(find . -type f -name '*.ko' | sort)
-
-          if [ "${#KO_FILES[@]}" -eq 0 ]; then
-            echo "ERROR: no .ko files found under $(pwd)"
-            echo "---- directory tree (depth 4) ----"
-            find . -maxdepth 4 -type d | sort | head -100
-            exit 1
-          fi
-
-          echo "Found ${#KO_FILES[@]} .ko files:"
-          printf '%s\n' "${KO_FILES[@]}"
-
-          # 保留相对路径打包，方便你对照系统里的 /lib/modules/...
-          tar -czvf "${MOD_DIR}/${ARTIFACT_NAME}-modules.tar.gz" "${KO_FILES[@]}"
-
-          # 也生成一份清单，方便排查
-          printf '%s\n' "${KO_FILES[@]}" > "${MOD_DIR}/${ARTIFACT_NAME}-modules.list"
-
-          echo "===== packaged ====="
-          ls -lh "$MOD_DIR"
+          echo "===== output tree ====="
+          find ../../output -maxdepth 5 | sort | head -80
+          du -sh ../../output
 
       - name: Upload Kernel Modules Artifact
         uses: actions/upload-artifact@v4
