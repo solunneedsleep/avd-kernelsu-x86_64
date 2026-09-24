@@ -805,9 +805,9 @@ jobs:
           du -sh ../../output
 
       - name: Upload Kernel Bundle
-  uses: actions/upload-artifact@v4
-  with:
-    name: ${{ steps.dist.outputs.artifact_name }}
-    path: output/*
-    if-no-files-found: error
-    compression-level: 9
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.dist.outputs.artifact_name }}
+          path: output/*
+          if-no-files-found: error
+          compression-level: 9
