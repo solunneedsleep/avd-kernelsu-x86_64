@@ -627,25 +627,27 @@ jobs:
           fi
           echo "Patch applied successfully."
       
-      - name: Enable dma-buf heaps for emulator graphics
+      - name: Configure kernel for emulator
         run: |
           cd kernel/common
           DEFCONFIG="arch/x86/configs/gki_defconfig"
-          if [ ! -f "$DEFCONFIG" ]; then
-            DEFCONFIG=$(find arch/x86/configs -name '*gki*defconfig' | head -1)
+          
+          # 在已有的 DMABUF_HEAPS 配置后插入 SYSTEM 和 CMA（只加缺的两行）
+          if ! grep -q '^CONFIG_DMABUF_HEAPS_SYSTEM=y' "$DEFCONFIG"; then
+            sed -i '/^CONFIG_DMABUF_HEAPS_PAGE_POOL=y$/a CONFIG_DMABUF_HEAPS_SYSTEM=y\nCONFIG_DMABUF_HEAPS_CMA=y' "$DEFCONFIG"
           fi
-          echo "Patching $DEFCONFIG"
-          {
-            echo "CONFIG_DMABUF_HEAPS=y"
-            echo "CONFIG_DMABUF_HEAPS_SYSTEM=y"
-            echo "CONFIG_DMABUF_HEAPS_CMA=y"
-            echo "CONFIG_DMABUF_HEAPS_DEFERRED_FREE=y"
-            echo "CONFIG_DMABUF_HEAPS_PAGE_POOL=y"
-            echo "CONFIG_DMABUF_SYSFS_STATS=y"
-            echo "CONFIG_DMABUF_HEAPS_SYSTEM_UNCACHED=y"
-          } >> "$DEFCONFIG"
-          echo "===== tail ====="
-          tail -10 "$DEFCONFIG"
+          
+          # 让 zram/zsmalloc/vsock 编进内核（减少 ramdisk 依赖）
+          # 注意：如果 GKI config 已经强制它们=m，这几行可能会被覆盖，不影响构建
+          for cfg in CONFIG_ZRAM=y CONFIG_ZSMALLOC=y CONFIG_VSOCKETS=y CONFIG_VIRTIO_VSOCKETS=y; do
+            key="${cfg%%=*}"
+            if ! grep -q "^${key}=" "$DEFCONFIG" && ! grep -q "^# ${key} is not set" "$DEFCONFIG"; then
+              echo "$cfg" >> "$DEFCONFIG"
+            fi
+          done
+          
+          echo "=== final dma_heap/zram/vsock config ==="
+          grep -E 'DMABUF_HEAPS|^CONFIG_ZRAM|^CONFIG_ZSMALLOC|^CONFIG_VSOCKETS|^CONFIG_VIRTIO_VSOCKETS' "$DEFCONFIG"
       
       - name: Build GKI Kernel
         run: |
