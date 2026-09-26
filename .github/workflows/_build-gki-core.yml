@@ -632,74 +632,28 @@ jobs:
           cd kernel/common
           DEFCONFIG="arch/x86/configs/gki_defconfig"
 
-          echo "=========================================="
-          echo "DIAGNOSTICS: dma_heap + goldfish"
-          echo "=========================================="
-
-          echo ""
-          echo "----- 1) gki_defconfig BEFORE -----"
+          echo "===== BEFORE ====="
           grep -nE 'DMABUF_HEAPS|GOLDFISH' "$DEFCONFIG" || echo "(no matching configs)"
 
-          echo ""
-          echo "----- 2) goldfish source tree? -----"
-          if [ -d drivers/platform/goldfish ]; then
-            echo "FOUND: drivers/platform/goldfish/"
-            ls -la drivers/platform/goldfish/
-          else
-            echo "NOT FOUND: drivers/platform/goldfish/"
-          fi
-
-          echo ""
-          echo "----- 3) any goldfish dir in tree? -----"
-          find . -path ./out -prune -o -type d -name '*goldfish*' -print 2>/dev/null | head -20
-
-          echo ""
-          echo "----- 4) Kconfig references to GOLDFISH -----"
-          grep -rn 'GOLDFISH' drivers/platform/Kconfig 2>/dev/null | head
-          grep -rn 'config GOLDFISH' drivers/ 2>/dev/null | head
-          grep -rn 'GOLDFISH_PIPE' drivers/ 2>/dev/null | head
-
-          echo ""
-          echo "----- 5) goldfish_pipe source files -----"
-          find . -path ./out -prune -o -name 'goldfish_pipe*' -print 2>/dev/null | head
-
-          echo ""
-          echo "=========================================="
-          echo "PATCHING"
-          echo "=========================================="
-
-          # ---- dma_heap ----
+          # ---- dma_heap (放在 PAGE_POOL 后) ----
           if ! grep -q '^CONFIG_DMABUF_HEAPS_SYSTEM=y' "$DEFCONFIG"; then
             sed -i '/^CONFIG_DMABUF_HEAPS_PAGE_POOL=y$/a CONFIG_DMABUF_HEAPS_SYSTEM=y\nCONFIG_DMABUF_HEAPS_CMA=y' "$DEFCONFIG"
             echo "dma_heap: added SYSTEM + CMA"
-          else
-            echo "dma_heap: already present"
           fi
 
-          # ---- goldfish ----
-          # 先删掉可能的 "not set"
-          sed -i '/^# CONFIG_GOLDFISH.* is not set$/d' "$DEFCONFIG"
+          # ---- goldfish (放在 savedefconfig 期望的位置) ----
+          if ! grep -q '^CONFIG_GOLDFISH=y$' "$DEFCONFIG"; then
+            sed -i '/^CONFIG_X86_X2APIC=y$/a CONFIG_GOLDFISH=y' "$DEFCONFIG"
+            echo "goldfish: added at X86_X2APIC"
+          fi
 
-          for cfg in \
-            "CONFIG_GOLDFISH=y" \
-            "CONFIG_GOLDFISH_PIPE=y" \
-            "CONFIG_GOLDFISH_PIPE_DEV=y" \
-            "CONFIG_GOLDFISH_SYNC=y" \
-            "CONFIG_GOLDFISH_ADDRESS_SPACE=y" \
-          ; do
-            key="${cfg%%=*}"
-            if ! grep -q "^${key}=" "$DEFCONFIG"; then
-              echo "$cfg" >> "$DEFCONFIG"
-              echo "goldfish: added $cfg"
-            else
-              echo "goldfish: $key already present"
-            fi
-          done
+          if ! grep -q '^CONFIG_GOLDFISH_PIPE=y$' "$DEFCONFIG"; then
+            sed -i '/^CONFIG_ASHMEM=y$/a CONFIG_GOLDFISH_PIPE=y' "$DEFCONFIG"
+            echo "goldfish_pipe: added at ASHMEM"
+          fi
 
-          echo ""
-          echo "----- gki_defconfig AFTER -----"
-          grep -nE 'DMABUF_HEAPS|GOLDFISH' "$DEFCONFIG" || echo "(none)"
-          echo "=========================================="
+          echo "===== AFTER ====="
+          grep -nE 'DMABUF_HEAPS|GOLDFISH' "$DEFCONFIG"
 
       
       - name: Build GKI Kernel
