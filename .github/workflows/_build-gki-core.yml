@@ -627,6 +627,26 @@ jobs:
           fi
           echo "Patch applied successfully."
       
+      - name: Enable dma-buf heaps for emulator graphics
+        run: |
+          cd kernel/common
+          DEFCONFIG="arch/x86/configs/gki_defconfig"
+          if [ ! -f "$DEFCONFIG" ]; then
+            DEFCONFIG=$(find arch/x86/configs -name '*gki*defconfig' | head -1)
+          fi
+          echo "Patching $DEFCONFIG"
+          {
+            echo "CONFIG_DMABUF_HEAPS=y"
+            echo "CONFIG_DMABUF_HEAPS_SYSTEM=y"
+            echo "CONFIG_DMABUF_HEAPS_CMA=y"
+            echo "CONFIG_DMABUF_HEAPS_DEFERRED_FREE=y"
+            echo "CONFIG_DMABUF_HEAPS_PAGE_POOL=y"
+            echo "CONFIG_DMABUF_SYSFS_STATS=y"
+            echo "CONFIG_DMABUF_HEAPS_SYSTEM_UNCACHED=y"
+          } >> "$DEFCONFIG"
+          echo "===== tail ====="
+          tail -10 "$DEFCONFIG"
+      
       - name: Build GKI Kernel
         run: |
           cd kernel
