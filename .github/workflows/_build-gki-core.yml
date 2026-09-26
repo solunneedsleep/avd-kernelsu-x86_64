@@ -627,40 +627,21 @@ jobs:
           fi
           echo "Patch applied successfully."
       
-      - name: Create Kernel Config Fragment
+      - name: Insert dma_heap SYSTEM and CMA into gki_defconfig
         run: |
           cd kernel/common
-          mkdir -p arch/x86/configs
+          DEFCONFIG="arch/x86/configs/gki_defconfig"
 
-          cat > arch/x86/configs/avd_emulator.fragment << 'EOF'
-          # dma-buf heaps for SurfaceFlinger graphics
-          CONFIG_DMABUF_HEAPS_SYSTEM=y
-          CONFIG_DMABUF_HEAPS_CMA=y
-          CONFIG_DMABUF_HEAPS_DEFERRED_FREE=y
-          CONFIG_DMABUF_HEAPS_PAGE_POOL=y
-          CONFIG_DMABUF_SYSFS_STATS=y
+          echo "===== BEFORE ====="
+          grep -n 'DMABUF_HEAPS' "$DEFCONFIG"
 
-          # emulator virtio console/host
-          CONFIG_VIRTIO_CONSOLE=y
+          # 幂等：只在还没加过时插入
+          if ! grep -q '^CONFIG_DMABUF_HEAPS_SYSTEM=y' "$DEFCONFIG"; then
+            sed -i '/^CONFIG_DMABUF_HEAPS_PAGE_POOL=y$/a CONFIG_DMABUF_HEAPS_SYSTEM=y\nCONFIG_DMABUF_HEAPS_CMA=y' "$DEFCONFIG"
+          fi
 
-          # zram / swap
-          CONFIG_ZRAM=y
-          CONFIG_ZSMALLOC=y
-
-          # vsock (adb over vsock)
-          CONFIG_VSOCKETS=y
-          CONFIG_VIRTIO_VSOCKETS=y
-          CONFIG_VIRTIO_VSOCKETS_COMMON=y
-
-          # emulator power/thermal stubs
-          CONFIG_POWER_RESET_SYSCON=y
-          CONFIG_THERMAL=y
-          CONFIG_THERMAL_GOV_STEP_WISE=y
-          CONFIG_THERMAL_GOV_USER_SPACE=y
-          EOF
-
-          echo "===== fragment ====="
-          cat arch/x86/configs/avd_emulator.fragment
+          echo "===== AFTER ====="
+          grep -n 'DMABUF_HEAPS' "$DEFCONFIG"
 
       
       - name: Build GKI Kernel
@@ -679,16 +660,6 @@ jobs:
             find . -name build_utils.sh -maxdepth 5 2>/dev/null
           fi
           echo "========== END DEBUG =========="
-
-          # >>> 新增：检查 fragment 是否存在 <<<
-          FRAGMENT_ARG=""
-          if [ -f common/arch/x86/configs/avd_emulator.fragment ]; then
-            FRAGMENT_ARG="--defconfig_fragment=common/arch/x86/configs/avd_emulator.fragment"
-            echo "Using fragment: $FRAGMENT_ARG"
-          else
-            echo "No fragment found, building with default config"
-          fi
-
           run_dist_target() {
             target="$1"
             dest="$2"
@@ -697,10 +668,10 @@ jobs:
 
             if grep -q -- '--destdir' <<< "$help_output"; then
               echo "Detected $target dist argument: --destdir"
-              tools/bazel run --config=fast --lto=none "$target" -- $FRAGMENT_ARG --destdir="$dest"    # <<< 改这行
+              tools/bazel run --config=fast --lto=none "$target" -- --destdir="$dest"
             elif grep -q -- '--dist_dir' <<< "$help_output"; then
               echo "Detected $target dist argument: --dist_dir"
-              tools/bazel run --config=fast --lto=none "$target" -- $FRAGMENT_ARG --dist_dir="$dest"   # <<< 改这行
+              tools/bazel run --config=fast --lto=none "$target" -- --dist_dir="$dest"
             else
               echo "Unable to detect dist argument for $target. Expected --destdir or --dist_dir in help output."
               exit 1
